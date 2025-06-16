@@ -1,4 +1,3 @@
-
 // Cookie banner detection and handling
 class CookieBannerHandler {
   constructor() {
@@ -79,25 +78,34 @@ class CookieBannerHandler {
 
     this.isEnabled = true;
     this.delay = 1000; // 1 second delay
+    this.maxRetries = 2; // Maximum attempts per domain
+    this.attemptCount = 0; // Current attempt count
+    this.domain = window.location.hostname;
     this.init();
   }
 
   async init() {
-    // Get settings from storage
-    const result = await chrome.storage.sync.get(['enabled', 'delay']);
+    // Get settings from storage including attempt count for this domain
+    const result = await chrome.storage.sync.get(['enabled', 'delay', 'domainAttempts']);
     this.isEnabled = result.enabled !== false; // Default to true
     this.delay = result.delay || 1000;
+    
+    // Get attempt count for current domain
+    const domainAttempts = result.domainAttempts || {};
+    this.attemptCount = domainAttempts[this.domain] || 0;
 
-    if (this.isEnabled) {
+    if (this.isEnabled && this.attemptCount < this.maxRetries) {
       this.startObserving();
       setTimeout(() => this.handleCookieBanners(), this.delay);
+    } else if (this.attemptCount >= this.maxRetries) {
+      console.log(`Cookie Banner Handler: Max attempts (${this.maxRetries}) reached for ${this.domain}, stopping`);
     }
   }
 
   startObserving() {
     // Observe DOM changes to catch dynamically loaded banners
     const observer = new MutationObserver((mutations) => {
-      if (this.isEnabled) {
+      if (this.isEnabled && this.attemptCount < this.maxRetries) {
         setTimeout(() => this.handleCookieBanners(), 500);
       }
     });
@@ -108,7 +116,25 @@ class CookieBannerHandler {
     });
   }
 
-  handleCookieBanners() {
+  async updateAttemptCount() {
+    // Increment attempt count for this domain
+    this.attemptCount++;
+    
+    const result = await chrome.storage.sync.get(['domainAttempts']);
+    const domainAttempts = result.domainAttempts || {};
+    domainAttempts[this.domain] = this.attemptCount;
+    
+    await chrome.storage.sync.set({ domainAttempts });
+    console.log(`Cookie Banner Handler: Attempt ${this.attemptCount}/${this.maxRetries} for ${this.domain}`);
+  }
+
+  async handleCookieBanners() {
+    // Check if we've exceeded max attempts
+    if (this.attemptCount >= this.maxRetries) {
+      console.log(`Cookie Banner Handler: Max attempts reached for ${this.domain}`);
+      return;
+    }
+
     // Find and click accept buttons
     for (const selector of this.commonSelectors) {
       const elements = this.findElementsWithText(selector);
@@ -116,13 +142,18 @@ class CookieBannerHandler {
       for (const element of elements) {
         if (this.isVisibleElement(element) && this.isInCookieBanner(element)) {
           console.log('Cookie Banner Handler: Found accept button', element);
+          
+          // Update attempt count before clicking
+          await this.updateAttemptCount();
+          
           element.click();
           
           // Log the action
           chrome.runtime.sendMessage({
             action: 'bannerHandled',
             url: window.location.href,
-            selector: selector
+            selector: selector,
+            attempt: this.attemptCount
           });
           
           return; // Exit after first successful click
