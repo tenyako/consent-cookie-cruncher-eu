@@ -12,6 +12,17 @@ chrome.runtime.onInstalled.addListener(() => {
       sitesVisited: []
     }
   });
+
+  // Create context menu with error handling
+  try {
+    chrome.contextMenus.create({
+      id: 'toggleCookieHandler',
+      title: 'Toggle Cookie Banner Handler',
+      contexts: ['page']
+    });
+  } catch (error) {
+    console.log('Context menu creation failed:', error);
+  }
 });
 
 // Handle messages from content script
@@ -34,13 +45,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// Optional: Add context menu item
-chrome.contextMenus.create({
-  id: 'toggleCookieHandler',
-  title: 'Toggle Cookie Banner Handler',
-  contexts: ['page']
-});
-
+// Handle context menu clicks with error handling
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'toggleCookieHandler') {
     chrome.storage.sync.get(['enabled'], (result) => {
@@ -48,7 +53,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       chrome.storage.sync.set({ enabled: newState });
       
       // Reload the current tab to apply changes
-      chrome.tabs.reload(tab.id);
+      if (tab && tab.id) {
+        chrome.tabs.reload(tab.id);
+      }
     });
   }
 });
